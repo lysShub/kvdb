@@ -1,5 +1,6 @@
 # Golang key/Value store frame
 
+because of k/v stord doesn't has table
 没有表的概念，使用前缀实现，前缀分割符"`"。
 
 key一般由
