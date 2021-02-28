@@ -1,4 +1,4 @@
-# badger的接口化
+# Golang key/Value store frame
 
 没有表的概念，使用前缀实现，前缀分割符"`"。
 
