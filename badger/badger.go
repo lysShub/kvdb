@@ -260,7 +260,7 @@ func GetTableValue(tableName, key string, dbHandle Handle) []byte {
 		k := item.KeyCopy(nil)
 		k = k[preLen:]
 
-		v, err = item.ValueCopy(nil)
+		v, err := item.ValueCopy(nil)
 		if err != nil {
 			return nil
 		}
