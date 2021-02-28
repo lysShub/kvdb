@@ -8,14 +8,6 @@ import (
 	"github.com/boltdb/bolt"
 )
 
-/*
-* CURD本地数据
-* 使用 bolt:github.com/boltdb/bolt
-* 所有value为[]byte； tableName和key为string
-* 所有的写入操作，不存在将新建；所有的删除操作，不存在将不报错；所有的读取操作，不存在将返回空字符串
-* bolt 使用于客户端(体积小)
- */
-
 // Handle handle
 type Handle = *bolt.DB
 

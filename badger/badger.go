@@ -10,7 +10,7 @@ import (
 )
 
 /*
-* tableName、id and field type is string; value type is []byte
+* tableName,id and field is string type; value is []byte type
 * all string type's parameter can't include delimiter
 * write: not exist will be create, exist will be overwritten
 * read : not exist or error will return nil
