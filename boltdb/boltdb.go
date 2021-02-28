@@ -1,9 +1,8 @@
 package boltdb
 
 import (
+	"bytes"
 	"errors"
-	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/boltdb/bolt"
@@ -17,195 +16,219 @@ import (
 * bolt 使用于客户端(体积小)
  */
 
-//获取二进制文件储存路径
-func dbBindaryPath() string {
-	return filepath.ToSlash(filepath.Dir(os.Args[0])) + `/database.db`
+// Handle handle
+type Handle = *bolt.DB
+
+// special bucket for original key/value store,
+// all base operation is in this bucket
+const sn = "_root"
+
+var err error
+
+// OpenDb open
+func OpenDb(path string) (Handle, error) {
+	db, err := bolt.Open(path, 0600, &bolt.Options{Timeout: 1 * time.Second})
+	if err != nil {
+		return nil, err
+	}
+	return db, nil
 }
 
-// CreateTable 创建表(不存在将创建；存在将追加，key重名将覆盖)
-// 表名 数据表
-func CreateTable(tableName string, mapList map[string][]byte) error {
-	db, err := bolt.Open(dbBindaryPath(), 0600, &bolt.Options{Timeout: 1 * time.Second})
-	if err != nil {
-		return err
-	}
-	defer db.Close()
+// CloseDb close
+func CloseDb(h Handle) error {
+	return h.Close()
+}
 
-	err = db.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(tableName))
+/*
+* base operation( original key/value )
+* all key/value store in special bucket(_root)
+ */
 
-		if b == nil { // 不存在表，创建
-			_, err := tx.CreateBucket([]byte(tableName))
+// SetKey set or updata key/value
+func SetKey(key string, value []byte, h Handle) error {
+	err = h.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(sn))
+		if b == nil {
+			_, err := tx.CreateBucket([]byte(sn))
 			if err != nil {
 				return err
 			}
 		}
-		// 写入
-		for key, v := range mapList {
-			c := tx.Bucket([]byte(tableName))
-			err := c.Put([]byte(key), v)
-			if err != nil {
-				return err
-			}
-		}
-		return nil
-
+		c := tx.Bucket([]byte(sn))
+		return c.Put([]byte(key), value)
 	})
 	return err
 }
 
-// ExistTable 表是否存在
-func ExistTable(tableName string) bool {
-	db, err := bolt.Open(dbBindaryPath(), 0600, &bolt.Options{Timeout: 1 * time.Second})
-	if err != nil {
-		return false
-	}
-	defer db.Close()
-
-	err1 := db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(tableName))
+// DeleteKey delete key
+func DeleteKey(key string, h Handle) error {
+	err = h.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(sn))
 		if b == nil {
-			return nil // 不存在
+			_, err := tx.CreateBucket([]byte(sn))
+			if err != nil {
+				return err
+			}
 		}
-		return errors.New("存在")
+		c := tx.Bucket([]byte(sn))
+		return c.Delete([]byte(key))
 	})
-	if err1 == nil {
-		return false
-	}
-	return true
+	return nil
 }
 
-//GetTable 获取表所有数据
-func GetTable(tableName string) (map[string][]byte, error) {
-	db, err := bolt.Open(dbBindaryPath(), 0600, &bolt.Options{Timeout: 1 * time.Second})
-	if err != nil {
-		return nil, err
-	}
-	defer db.Close()
-	R := make(map[string][]byte)
-
-	err1 := db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(tableName))
+// GetValue get value
+func GetValue(key string, h Handle) []byte {
+	var r []byte
+	err = h.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(sn))
 		if b == nil {
-			var err error = errors.New("不存在表：" + tableName)
+			var err error = errors.New("不存在表：" + sn)
 			return err
 		}
 		c := b.Cursor()
 		for k, v := c.First(); k != nil; k, v = c.Next() {
-			if k != nil && v == nil {
-				continue
+			if bytes.Equal(k, []byte(key)) {
+				r = v
+				break
 			}
-			R[string(k)] = v
-		}
-
-		return nil
-	})
-
-	return R, err1
-}
-
-// GetTableValue 读取tableName表中key的值
-// 字段名 表名(空默认为root表)
-func GetTableValue(key string, tableName string) (string, error) {
-
-	db, err := bolt.Open(dbBindaryPath(), 0600, &bolt.Options{Timeout: 1 * time.Second})
-	if err != nil {
-		return "", err
-	}
-	defer db.Close()
-
-	var val string
-	err = db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(tableName))
-		if b != nil {
-			data := b.Get([]byte(key))
-
-			val = string(data)
-			if val == "" {
-				var err1 error = errors.New("表：" + tableName + "中,值：" + key + "不存在")
-				return err1
-			}
-		} else {
-			var err1 error = errors.New("表：" + tableName + "不存在")
-			return err1
 		}
 		return nil
 	})
-	if err != nil {
-		return "", err
-	}
-	return val, nil
+	return r
 }
 
-// SetTableValue 在表中增改一个key:value; 存在将会覆盖;表不存在将创建
-// 字段名 值 表名
-func SetTableValue(key string, value []byte, tableName string) error {
+/*
+* Table operation, by bucket nested achieve
+* get a value need parameters: tableName, field, id;
+* bucket name = tableName
+* secondary bucket name = id(id as PRIMARY_KEY in sql)
+ */
 
-	db, err := bolt.Open(dbBindaryPath(), 0600, &bolt.Options{Timeout: 1 * time.Second})
-	if err != nil {
-		return err
-	}
-	defer db.Close()
+// CreatTable create/set a table; exist will be rewrite
+func CreatTable(tableName, id string, fv map[string][]byte, h Handle) error {
+	err = h.Update(func(tx *bolt.Tx) error {
+		b, err := tx.CreateBucketIfNotExists([]byte(tableName))
+		if err != nil {
+			return err
+		}
 
-	err = db.Update(func(tx *bolt.Tx) error {
+		sb, err := b.CreateBucketIfNotExists([]byte(id)) //secondary bucket
+		if err != nil {
+			return err
+		}
 
-		b := tx.Bucket([]byte(tableName))
-
-		if b == nil { // 不存在tn表，创建
-			_, err := tx.CreateBucket([]byte(tableName))
+		for f, v := range fv {
+			err := sb.Put([]byte(f), v)
 			if err != nil {
 				return err
 			}
 		}
+		return nil
+	})
+	return err
+}
 
-		//现在表一定存在 写入
-		c := tx.Bucket([]byte(tableName))
-		err := c.Put([]byte(key), value)
+// SetTableValue set/updata a table's value
+func SetTableValue(tableName, id, field, string, value []byte, h Handle) error {
+	err = h.Update(func(tx *bolt.Tx) error {
+		b, err := tx.CreateBucketIfNotExists([]byte(tableName))
 		if err != nil {
 			return err
 		}
+
+		sb, err := b.CreateBucketIfNotExists([]byte(id)) //secondary bucket
+		if sb == nil {
+			return err
+		}
+
+		err = sb.Put([]byte(field), value)
+		return err
+	})
+	return err
+}
+
+// ExistTable detect tableName is exist
+func ExistTable(tableName string, h Handle) bool {
+	var r bool
+	_ = h.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(tableName))
+		if b != nil {
+			r = true
+		} else {
+			r = false
+		}
 		return nil
 	})
-	return err
+	return r
 }
 
-// DeleteTableKey 删除一个key
-func DeleteTableKey(tableName, key string) error {
-	db, err := bolt.Open(dbBindaryPath(), 0600, &bolt.Options{Timeout: 1 * time.Second})
-	if err != nil {
-		return err
-	}
-	defer db.Close()
-
-	err = db.Update(func(tx *bolt.Tx) error {
-		return tx.Bucket([]byte(tableName)).Delete([]byte(key))
-	})
-	return err
-}
-
-// DeleteTable 删除一个表
-func DeleteTable(tableName string) error {
-	db, err := bolt.Open(dbBindaryPath(), 0600, &bolt.Options{Timeout: 1 * time.Second})
-	if err != nil {
-		return err
-	}
-	defer db.Close()
-
-	//不存在不返回错误
-	isExist := db.View(func(tx *bolt.Tx) error {
+// ExistTableRecord detect table has id record
+func ExistTableRecord(tableName, id string, h Handle) bool {
+	var r bool
+	_ = h.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(tableName))
 		if b == nil {
+			r = false
 			return nil
 		}
-		return errors.New("表不存在")
-	})
-	if isExist == nil {
+		sb := b.Bucket([]byte(id))
+		if sb == nil {
+			r = false
+		} else {
+			r = true
+		}
 		return nil
-	}
-
-	err = db.Update(func(tx *bolt.Tx) error {
-		c := tx.DeleteBucket([]byte(tableName))
-		return c
 	})
-	return err
+	return r
+}
+
+// GetTable get a table's all values
+func GetTable(tableName, id string, h Handle) map[string][]byte {
+	var r map[string][]byte = make(map[string][]byte)
+	_ = h.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(tableName))
+		if b == nil {
+			r = nil
+			return nil
+		}
+		sb := b.Bucket([]byte(id))
+		if sb == nil {
+			r = nil
+			return nil
+		}
+		c := sb.Cursor()
+		for k, v := c.First(); k != nil; k, v = c.Next() {
+			r[string(k)] = v
+		}
+		return nil
+	})
+	return r
+}
+
+// GetTableValue get one specify value
+func GetTableValue(tableName, id, field string, h Handle) []byte {
+	var r []byte
+	_ = h.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(tableName))
+		if b == nil {
+			r = nil
+			return nil
+		}
+		sb := b.Bucket([]byte(id))
+		if sb == nil {
+			r = nil
+			return nil
+		}
+		r = sb.Get([]byte(field))
+		return nil
+	})
+	return r
+}
+
+// EqualTableValue check the specify value is equal judgeValue
+func EqualTableValue(tableName, id, field string, judgeValue []byte, h Handle) bool {
+	if bytes.Equal(judgeValue, GetTableValue(tableName, id, field, h)) {
+		return true
+	}
+	return false
 }

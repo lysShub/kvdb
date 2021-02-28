@@ -12,7 +12,7 @@ import (
 /*
 * tableName、id and field type is string; value type is []byte
 * all string type's parameter can't include delimiter
-* write: not exist will be create, exist will be rewrite
+* write: not exist will be create, exist will be overwritten
 * read : not exist or error will return nil
  */
 
@@ -74,20 +74,20 @@ func checkkey(ks ...string) bool {
  */
 
 // SetKey set or updata key-value
-func SetKey(key string, value []byte, dbHandle Handle, surTime ...time.Duration) error {
+func SetKey(key string, value []byte, h Handle, ttl ...time.Duration) error {
 	if !checkkey(key) {
 		return errStr
 	}
-	txn := dbHandle.NewTransaction(true)
+	txn := h.NewTransaction(true)
 	defer txn.Discard()
 
-	if len(surTime) == 0 {
+	if len(ttl) == 0 {
 		if err = txn.Set([]byte(key), value); err != nil {
 			return err
 		}
 	} else {
 		if err = txn.SetEntry(
-			badger.NewEntry([]byte(key), value).WithTTL(surTime[0])); err != nil {
+			badger.NewEntry([]byte(key), value).WithTTL(ttl[0])); err != nil {
 			return err
 		}
 	}
@@ -95,11 +95,11 @@ func SetKey(key string, value []byte, dbHandle Handle, surTime ...time.Duration)
 }
 
 // DeleteKey delete a key-value
-func DeleteKey(key string, dbHandle Handle) error {
+func DeleteKey(key string, h Handle) error {
 	if !checkkey(key) {
 		return errStr
 	}
-	txn := dbHandle.NewTransaction(true)
+	txn := h.NewTransaction(true)
 	defer txn.Discard()
 
 	if err = txn.Delete([]byte(key)); err != nil {
@@ -109,8 +109,8 @@ func DeleteKey(key string, dbHandle Handle) error {
 }
 
 // GetValue get a value by key, key not exist will return nil
-func GetValue(key string, dbHandle Handle) []byte {
-	txn := dbHandle.NewTransaction(false)
+func GetValue(key string, h Handle) []byte {
+	txn := h.NewTransaction(false)
 	defer txn.Discard()
 	item, err := txn.Get([]byte(key))
 	if err != nil {
@@ -131,28 +131,28 @@ func GetValue(key string, dbHandle Handle) []byte {
 
 /*
 * Table operation, Prefix achieve tables.
-* get a table's value need: tableName,field,id;
-* so the key = tableName`id`field (` is delimiter)
+* get a table's value need parameter: tableName,field,id;
+* key = tableName`id`field (` is delimiter, as PRIMARY_KEY in sql )
  */
 
-// CreatTable create/set a table; exist will be rewrite
-func CreatTable(tableName, id string, fv map[string][]byte, dbHandle Handle, surTime ...time.Duration) error {
+// CreatTable create/set a table; exist will be overwritten
+func CreatTable(tableName, id string, fv map[string][]byte, h Handle, ttl ...time.Duration) error {
 	if !checkkey(tableName, id) {
 		return errStr
 	}
-	txn := dbHandle.NewTransaction(true)
+	txn := h.NewTransaction(true)
 	defer txn.Discard()
 
 	for f, v := range fv {
 		if !checkkey(f) {
 			return errStr
 		}
-		if len(surTime) == 0 {
+		if len(ttl) == 0 {
 			if err = txn.Set([]byte(tableName+d+id+d+f), v); err != nil {
 				return err
 			}
 		} else {
-			if err = txn.SetEntry(badger.NewEntry([]byte(tableName+d+id+d+f), v).WithTTL(surTime[0])); err != nil {
+			if err = txn.SetEntry(badger.NewEntry([]byte(tableName+d+id+d+f), v).WithTTL(ttl[0])); err != nil {
 				return err
 			}
 		}
@@ -162,21 +162,21 @@ func CreatTable(tableName, id string, fv map[string][]byte, dbHandle Handle, sur
 }
 
 // SetTableValue set/updata a table's value
-func SetTableValue(tableName, field, id string, value []byte, dbHandle Handle, surTime ...time.Duration) error {
+func SetTableValue(tableName, id, field string, value []byte, h Handle, ttl ...time.Duration) error {
 	if !checkkey(tableName, field, id) {
 		return errStr
 	}
-	txn := dbHandle.NewTransaction(true)
+	txn := h.NewTransaction(true)
 	it := txn.NewIterator(badger.DefaultIteratorOptions)
 	defer txn.Discard()
 	defer it.Close()
 
-	if len(surTime) == 0 {
+	if len(ttl) == 0 {
 		if err = txn.Set([]byte(tableName+d+id+d+field), []byte(value)); err != nil {
 			return err
 		}
 	} else {
-		if err = txn.SetEntry(badger.NewEntry([]byte(tableName+d+id+d+field), []byte(value)).WithTTL(surTime[0])); err != nil {
+		if err = txn.SetEntry(badger.NewEntry([]byte(tableName+d+id+d+field), []byte(value)).WithTTL(ttl[0])); err != nil {
 			return err
 		}
 	}
@@ -185,8 +185,8 @@ func SetTableValue(tableName, field, id string, value []byte, dbHandle Handle, s
 }
 
 // ExistTable detect tableName is exist
-func ExistTable(tableName string, dbHandle Handle) bool {
-	txn := dbHandle.NewTransaction(false)
+func ExistTable(tableName string, h Handle) bool {
+	txn := h.NewTransaction(false)
 	it := txn.NewIterator(badger.DefaultIteratorOptions)
 	defer txn.Discard()
 	defer it.Close()
@@ -200,9 +200,9 @@ func ExistTable(tableName string, dbHandle Handle) bool {
 	return R
 }
 
-// ExistTableField detect tableName`id is exist
-func ExistTableField(tableName, id string, dbHandle Handle) bool {
-	txn := dbHandle.NewTransaction(false)
+// ExistTableRecord detect table has id record
+func ExistTableRecord(tableName, id string, h Handle) bool {
+	txn := h.NewTransaction(false)
 	it := txn.NewIterator(badger.DefaultIteratorOptions)
 	defer txn.Discard()
 	defer it.Close()
@@ -217,9 +217,9 @@ func ExistTableField(tableName, id string, dbHandle Handle) bool {
 }
 
 // GetTable get a table's all values
-func GetTable(tableName, id string, dbHandle Handle) map[string][]byte {
+func GetTable(tableName, id string, h Handle) map[string][]byte {
 
-	txn := dbHandle.NewTransaction(false) // 新建只读事务
+	txn := h.NewTransaction(false) // 新建只读事务
 	it := txn.NewIterator(badger.DefaultIteratorOptions)
 	defer txn.Discard()
 	defer it.Close()
@@ -243,14 +243,14 @@ func GetTable(tableName, id string, dbHandle Handle) map[string][]byte {
 	return R
 }
 
-// GetTableValue 获取table的某个值
-func GetTableValue(tableName, key string, dbHandle Handle) []byte {
-	txn := dbHandle.NewTransaction(false) // 新建只读事务
+// GetTableValue get one specify value
+func GetTableValue(tableName, id, field string, h Handle) []byte {
+	txn := h.NewTransaction(false)
 	it := txn.NewIterator(badger.DefaultIteratorOptions)
 	defer txn.Discard()
 	defer it.Close()
 
-	prefix := []byte(tableName + d)
+	prefix := []byte(tableName + d + id + d + field)
 	preLen := len(prefix)
 	var R []byte
 
@@ -262,9 +262,10 @@ func GetTableValue(tableName, key string, dbHandle Handle) []byte {
 
 		v, err := item.ValueCopy(nil)
 		if err != nil {
+			// log err
 			return nil
 		}
-		if string(k) == key {
+		if string(k) == id {
 			R = v
 			break
 		}
@@ -273,9 +274,9 @@ func GetTableValue(tableName, key string, dbHandle Handle) []byte {
 	return R
 }
 
-// EqualTableValue 表中某个值是否相等，不存在\出错返回false
-func EqualTableValue(tableName, key string, judgeValue []byte, dbHandle Handle) bool {
-	if bytes.Equal(judgeValue, GetTableValue(tableName, key, dbHandle)) {
+// EqualTableValue check the specify value is equal judgeValue
+func EqualTableValue(tableName, id, field string, judgeValue []byte, h Handle) bool {
+	if bytes.Equal(judgeValue, GetTableValue(tableName, id, field, h)) {
 		return true
 	}
 	return false
