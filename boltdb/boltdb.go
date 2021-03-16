@@ -1,8 +1,7 @@
 package boltdb
 
 import (
-	"bytes"
-	"errors"
+	"kvdb/com"
 	"time"
 
 	"github.com/boltdb/bolt"
@@ -11,77 +10,182 @@ import (
 // Handle handle
 type Handle = *bolt.DB
 
-// special bucket for original key/value store,
-// all base operation is in this bucket
+type Boltdb struct {
+	Path     string
+	DbHandle Handle
+	Root     string
+}
+
+// 单纯key/value储存桶
 const sn = "_root"
 
 var err error
+var b *bolt.Bucket
 
 // OpenDb open
-func OpenDb(path string) (Handle, error) {
+func (d *Boltdb) OpenDb(path string) error {
 	db, err := bolt.Open(path, 0600, &bolt.Options{Timeout: 1 * time.Second})
 	if err != nil {
-		return nil, err
+		return err
 	}
-	return db, nil
+	d.DbHandle = db
+	return nil
 }
 
 // CloseDb close
-func CloseDb(h Handle) error {
-	return h.Close()
+func (d *Boltdb) Close() error {
+	return d.DbHandle.Close()
 }
 
-/*
-* base operation( original key/value )
-* all key/value store in special bucket(_root)
- */
+// key/value
 
 // SetKey set or updata key/value
-func SetKey(key string, value []byte, h Handle) error {
-	err = h.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(sn))
-		if b == nil {
-			_, err := tx.CreateBucket([]byte(sn))
-			if err != nil {
-				return err
-			}
+func (d *Boltdb) SetKey(key string, value []byte) error {
+	err = d.DbHandle.Update(func(tx *bolt.Tx) error {
+		if b, err = tx.CreateBucketIfNotExists([]byte(sn)); err != nil {
+			return err
 		}
-		c := tx.Bucket([]byte(sn))
-		return c.Put([]byte(key), value)
+		return b.Put([]byte(key), value)
 	})
 	return err
 }
 
 // DeleteKey delete key
-func DeleteKey(key string, h Handle) error {
-	err = h.Update(func(tx *bolt.Tx) error {
+func (d *Boltdb) DeleteKey(key string) error {
+	err = d.DbHandle.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(sn))
 		if b == nil {
-			_, err := tx.CreateBucket([]byte(sn))
-			if err != nil {
-				return err
-			}
+			return nil
 		}
-		c := tx.Bucket([]byte(sn))
-		return c.Delete([]byte(key))
+		return b.Delete([]byte(key))
 	})
 	return nil
 }
 
-// GetValue get value
-func GetValue(key string, h Handle) []byte {
+// ReadKey
+func (d *Boltdb) ReadKey(key string) []byte {
 	var r []byte
-	err = h.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(sn))
-		if b == nil {
-			var err error = errors.New("不存在表：" + sn)
+	err = d.DbHandle.View(func(tx *bolt.Tx) error {
+		if b = tx.Bucket([]byte(sn)); b == nil {
+			return nil
+		}
+		_, r = b.Cursor().Seek([]byte(key))
+		return nil
+	})
+	return r
+}
+
+// table
+
+// SetTable
+func (d *Boltdb) SetTable(tableName string, p map[string]map[string][]byte) error {
+
+	err = d.DbHandle.Batch(func(tx *bolt.Tx) error {
+		b, err := tx.CreateBucketIfNotExists([]byte(tableName))
+		if err != nil {
 			return err
 		}
-		c := b.Cursor()
+
+		var sb *bolt.Bucket
+		for id, fv := range p {
+			if sb, err = b.CreateBucketIfNotExists([]byte(id)); err != nil { //sb: secondary bucket
+				return err
+			}
+			for f, v := range fv {
+				err := sb.Put([]byte(f), v)
+				if err != nil {
+					return err
+				}
+			}
+		}
+
+		return nil
+	})
+	return err
+}
+
+// SetTableRow
+func (d *Boltdb) SetTableRow(tableName, id string, fv map[string][]byte) error {
+	err = d.DbHandle.Update(func(tx *bolt.Tx) error {
+		b, err := tx.CreateBucketIfNotExists([]byte(tableName))
+		if err != nil {
+			return err
+		}
+
+		var sb *bolt.Bucket
+		if sb, err = b.CreateBucketIfNotExists([]byte(id)); err != nil {
+			return err
+		}
+
+		for f, v := range fv {
+			if err = sb.Put([]byte(f), v); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	return err
+}
+
+// SetTableValue
+func (d *Boltdb) SetTableValue(tableName, id, field string, value []byte) error {
+	err = d.DbHandle.Update(func(tx *bolt.Tx) error {
+		b, err := tx.CreateBucketIfNotExists([]byte(tableName))
+		if err != nil {
+			return err
+		}
+
+		var sb *bolt.Bucket
+		if sb, err := b.CreateBucketIfNotExists([]byte(id)); sb == nil {
+			return err
+		}
+
+		return sb.Put([]byte(field), value)
+	})
+	return err
+}
+
+// DeleteTable
+func (d *Boltdb) DeleteTable(tableName string) error {
+	err = d.DbHandle.Update(func(tx *bolt.Tx) error {
+		return tx.DeleteBucket([]byte(tableName))
+	})
+	return err
+}
+
+// DeleteTableRow
+func (d *Boltdb) DeleteTableRow(tableName, id string) error {
+	err = d.DbHandle.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(tableName))
+		if b == nil { // bucket not exist
+			return nil
+		}
+		return b.DeleteBucket([]byte(id))
+	})
+	return err
+}
+
+// ReadTable
+func (d *Boltdb) ReadTable(tableName string) map[string]map[string][]byte {
+	var r map[string]map[string][]byte = make(map[string]map[string][]byte)
+
+	_ = d.DbHandle.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(tableName))
+		if b == nil {
+			return nil
+		}
+
+		var c, sc *bolt.Cursor = b.Cursor(), nil
 		for k, v := c.First(); k != nil; k, v = c.Next() {
-			if bytes.Equal(k, []byte(key)) {
-				r = v
-				break
+			if k != nil && v == nil {
+				var tmp map[string][]byte = make(map[string][]byte)
+				sc = tx.Bucket(k).Cursor()
+				for k, v := sc.First(); k != nil; k, v = sc.Next() {
+					if k != nil && v != nil {
+						tmp[string(k)] = v
+					}
+				}
+				r[string(k)] = tmp
 			}
 		}
 		return nil
@@ -89,60 +193,10 @@ func GetValue(key string, h Handle) []byte {
 	return r
 }
 
-/*
-* Table operation, by bucket nested achieve
-* get a value need parameters: tableName, field, id;
-* bucket name = tableName
-* secondary bucket name = id(id as PRIMARY_KEY in sql)
- */
-
-// CreatTable create/set a table; exist will be rewrite
-func CreatTable(tableName, id string, fv map[string][]byte, h Handle) error {
-	err = h.Update(func(tx *bolt.Tx) error {
-		b, err := tx.CreateBucketIfNotExists([]byte(tableName))
-		if err != nil {
-			return err
-		}
-
-		sb, err := b.CreateBucketIfNotExists([]byte(id)) //secondary bucket
-		if err != nil {
-			return err
-		}
-
-		for f, v := range fv {
-			err := sb.Put([]byte(f), v)
-			if err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-	return err
-}
-
-// SetTableValue set/updata a table's value
-func SetTableValue(tableName, id, field, string, value []byte, h Handle) error {
-	err = h.Update(func(tx *bolt.Tx) error {
-		b, err := tx.CreateBucketIfNotExists([]byte(tableName))
-		if err != nil {
-			return err
-		}
-
-		sb, err := b.CreateBucketIfNotExists([]byte(id)) //secondary bucket
-		if sb == nil {
-			return err
-		}
-
-		err = sb.Put([]byte(field), value)
-		return err
-	})
-	return err
-}
-
-// ExistTable detect tableName is exist
-func ExistTable(tableName string, h Handle) bool {
+// ReadTableExist
+func (d *Boltdb) ReadTableExist(tableName string) bool {
 	var r bool
-	_ = h.View(func(tx *bolt.Tx) error {
+	_ = d.DbHandle.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(tableName))
 		if b != nil {
 			r = true
@@ -154,30 +208,10 @@ func ExistTable(tableName string, h Handle) bool {
 	return r
 }
 
-// ExistTableRecord detect table has id record
-func ExistTableRecord(tableName, id string, h Handle) bool {
-	var r bool
-	_ = h.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(tableName))
-		if b == nil {
-			r = false
-			return nil
-		}
-		sb := b.Bucket([]byte(id))
-		if sb == nil {
-			r = false
-		} else {
-			r = true
-		}
-		return nil
-	})
-	return r
-}
-
-// GetTable get a table's all values
-func GetTable(tableName, id string, h Handle) map[string][]byte {
+// ReadTableRow
+func (d *Boltdb) ReadTableRow(tableName, id string) map[string][]byte {
 	var r map[string][]byte = make(map[string][]byte)
-	_ = h.View(func(tx *bolt.Tx) error {
+	_ = d.DbHandle.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(tableName))
 		if b == nil {
 			r = nil
@@ -197,18 +231,16 @@ func GetTable(tableName, id string, h Handle) map[string][]byte {
 	return r
 }
 
-// GetTableValue get one specify value
-func GetTableValue(tableName, id, field string, h Handle) []byte {
+// ReadTableValue
+func (d *Boltdb) ReadTableValue(tableName, id, field string) []byte {
 	var r []byte
-	_ = h.View(func(tx *bolt.Tx) error {
+	_ = d.DbHandle.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(tableName))
 		if b == nil {
-			r = nil
 			return nil
 		}
-		sb := b.Bucket([]byte(id))
-		if sb == nil {
-			r = nil
+		var sb *bolt.Bucket
+		if sb = b.Bucket([]byte(id)); sb == nil {
 			return nil
 		}
 		r = sb.Get([]byte(field))
@@ -217,10 +249,38 @@ func GetTableValue(tableName, id, field string, h Handle) []byte {
 	return r
 }
 
-// EqualTableValue check the specify value is equal judgeValue
-func EqualTableValue(tableName, id, field string, judgeValue []byte, h Handle) bool {
-	if bytes.Equal(judgeValue, GetTableValue(tableName, id, field, h)) {
-		return true
-	}
-	return false
+// ReadTableLimits
+func (d *Boltdb) ReadTableLimits(tableName, field, exp string, value int) []string {
+	var r []string
+	_ = d.DbHandle.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(tableName))
+		if b == nil {
+			r = nil
+			return nil
+		}
+
+		var c, sc *bolt.Cursor = b.Cursor(), nil
+		for k, v := c.First(); k != nil; k, v = c.Next() {
+			if k != nil && v == nil {
+				id := k
+
+				sc = tx.Bucket(k).Cursor()
+				for k, v := sc.First(); k != nil; k, v = sc.Next() {
+					if string(k) == field {
+						fag, err := com.ExpressionCalculate(exp, value, v)
+						if err != nil {
+							return err
+						}
+						if fag {
+							r = append(r, string(id))
+						}
+
+					}
+				}
+			}
+		}
+		return nil
+	})
+
+	return r
 }

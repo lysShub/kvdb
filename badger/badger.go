@@ -4,64 +4,83 @@ import (
 	"bytes"
 	"errors"
 	"os"
+	"path/filepath"
 	"time"
 
 	badger "github.com/dgraph-io/badger/v2"
 )
 
-/*
-* tableName,id and field is string type; value is []byte type
-* all string type's parameter can't include delimiter
-* write: not exist will be create, exist will be overwritten
-* read : not exist or error will return nil
- */
-
 // Handle db handle
 type Handle = *badger.DB
 
-// delimiter
-const d string = "`"
+// Badger badgerdb
+// badgerdb中没有表的概念，使用前缀实现，使用Delimiter区分前缀和字段
+type Badger struct {
+	DbHandle  Handle   //必须，数据库句柄
+	Path      string   //储存路径，默认路径文当前路径db文件夹
+	Password  [16]byte //密码，默认无密码
+	RAM       bool     //内存模式，默认false
+	Delimiter string   //分割符，默认为字符`
+}
 
-var errStr error = errors.New("parameter can not include character: " + d)
+var errStr error = errors.New("can not include delimiter character")
 var err error
 
 // OpenDb open db
-func OpenDb(path string, password ...string) (Handle, error) {
-	fi, err := os.Stat(path)
-	if err != nil || os.IsNotExist(err) || !fi.IsDir() {
-		if os.IsNotExist(err) || !fi.IsDir() { // floder not exist
-			err = os.MkdirAll(path, os.FileMode(os.O_CREATE)|os.FileMode(os.O_RDWR))
-			if err != nil {
-				return nil, err
+func (d *Badger) OpenDb() error {
+	if d.Path != "" { // 设置路径
+		fi, err := os.Stat(d.Path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				if err = os.MkdirAll(d.Path, os.FileMode(os.O_CREATE)|os.FileMode(os.O_RDWR)); err != nil {
+					return err
+				}
+			} else {
+				return err
 			}
-		} else { // such as permissions...
-			return nil, err
+		} else if !fi.IsDir() { //存在同名文件
+			if err = os.MkdirAll(d.Path, os.FileMode(os.O_CREATE)|os.FileMode(os.O_RDWR)); err != nil {
+				return err
+			}
 		}
+	} else { // 设置为默认路径
+		var path string = filepath.ToSlash(filepath.Dir(os.Args[0])) + `/db/`
+		if err := os.MkdirAll(path, os.FileMode(os.O_CREATE)|os.FileMode(os.O_RDWR)); err != nil {
+			return err
+		}
+		d.Path = path
 	}
 
 	var opts badger.Options
-	opts = badger.DefaultOptions(path)
-	opts = opts.WithLoggingLevel(badger.ERROR) // log level
+	opts = badger.DefaultOptions(d.Path)
+	opts = opts.WithLoggingLevel(badger.ERROR)
 
-	if len(password) != 0 {
-		opts.EncryptionKey = []byte(password[0]) //encypto
+	if d.RAM {
+		opts.InMemory = true
+	}
+	if d.Password[:] != nil {
+		opts.EncryptionKey = d.Password[:]
+	}
+	if d.Delimiter == "" {
+		d.Delimiter = "`"
 	}
 	opts.ValueLogFileSize = 1 << 29 //512MB
-	opts.Dir = path
-	opts.ValueDir = path
+	opts.Dir = d.Path
+	opts.ValueDir = d.Path
 	db, err := badger.Open(opts)
-	return db, err
+	d.DbHandle = db
+	return err
 }
 
-// CloseDb close db handle
-func CloseDb(h Handle) error {
-	return h.Close()
+// CloseDb close
+func (d *Badger) CloseDb() error {
+	return d.DbHandle.Close()
 }
 
-func checkkey(ks ...string) bool {
+func (d *Badger) checkkey(ks ...string) bool {
 	for _, k := range ks {
 		for _, v := range k {
-			if string(v) == d {
+			if string(v) == d.Delimiter {
 				return false
 			}
 		}
@@ -69,16 +88,14 @@ func checkkey(ks ...string) bool {
 	return true
 }
 
-/*
-* base operation( original key/value )
- */
+// key/value
 
-// SetKey set or updata key-value
-func SetKey(key string, value []byte, h Handle, ttl ...time.Duration) error {
-	if !checkkey(key) {
+// SetKey
+func (d *Badger) SetKey(key string, value []byte, ttl ...time.Duration) error {
+	if !d.checkkey(key) {
 		return errStr
 	}
-	txn := h.NewTransaction(true)
+	txn := d.DbHandle.NewTransaction(true)
 	defer txn.Discard()
 
 	if len(ttl) == 0 {
@@ -94,9 +111,9 @@ func SetKey(key string, value []byte, h Handle, ttl ...time.Duration) error {
 	return txn.Commit()
 }
 
-// DeleteKey delete a key-value
-func DeleteKey(key string, h Handle) error {
-	if !checkkey(key) {
+// DeleteKey
+func (d *Badger) DeleteKey(key string, h Handle) error {
+	if !d.checkkey(key) {
 		return errStr
 	}
 	txn := h.NewTransaction(true)
@@ -108,90 +125,88 @@ func DeleteKey(key string, h Handle) error {
 	return txn.Commit()
 }
 
-// GetValue get a value by key, key not exist will return nil
-func GetValue(key string, h Handle) []byte {
-	txn := h.NewTransaction(false)
+// ReadKey
+func (d *Badger) ReadKey(key string) []byte {
+	txn := d.DbHandle.NewTransaction(false)
 	defer txn.Discard()
-	item, err := txn.Get([]byte(key))
-	if err != nil {
-		return []byte("")
+
+	var item *badger.Item
+	if item, err = txn.Get([]byte(key)); err != nil {
+		return nil
 	}
 
-	err = txn.Commit()
-	if err != nil {
-		return []byte("")
+	if err = txn.Commit(); err != nil {
+		return nil
 	}
 
-	valCopy, err := item.ValueCopy(nil)
-	if err != nil {
-		return []byte("")
+	var valCopy []byte
+	if valCopy, err = item.ValueCopy(nil); err != nil {
+		return nil
 	}
 	return valCopy
 }
 
-/*
-* Table operation, Prefix achieve tables.
-* get a table's value need parameter: tableName,field,id;
-* key = tableName`id`field (` is delimiter, as PRIMARY_KEY in sql )
- */
+// table
 
-// CreatTable create/set a table; exist will be overwritten
-func CreatTable(tableName, id string, fv map[string][]byte, h Handle, ttl ...time.Duration) error {
-	if !checkkey(tableName, id) {
-		return errStr
-	}
-	txn := h.NewTransaction(true)
+// SetTable
+func (d *Badger) SetTable(tableName string, t map[string]map[string][]byte, ttl ...time.Duration) error {
+
+	txn := d.DbHandle.NewTransaction(true)
 	defer txn.Discard()
 
-	for f, v := range fv {
-		if !checkkey(f) {
+	for id, kv := range t {
+		if !d.checkkey(id) {
 			return errStr
 		}
+		for k, v := range kv {
+			if len(ttl) == 0 {
+				if err = txn.Set([]byte(tableName+d.Delimiter+id+d.Delimiter+k), v); err != nil {
+					return err
+				}
+			} else {
+				if err = txn.SetEntry(badger.NewEntry([]byte(tableName+d.Delimiter+id+d.Delimiter+k), v).WithTTL(ttl[0])); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return txn.Commit()
+}
+
+// SetTableRow
+func (d *Badger) SetTableRow(tableName, id string, kv map[string][]byte, ttl ...time.Duration) error {
+	txn := d.DbHandle.NewTransaction(true)
+	it := txn.NewIterator(badger.DefaultIteratorOptions)
+	defer txn.Discard()
+	defer it.Close()
+
+	for k, v := range kv {
 		if len(ttl) == 0 {
-			if err = txn.Set([]byte(tableName+d+id+d+f), v); err != nil {
+			if err = txn.Set([]byte(tableName+d.Delimiter+id+d.Delimiter+k), []byte(v)); err != nil {
 				return err
 			}
 		} else {
-			if err = txn.SetEntry(badger.NewEntry([]byte(tableName+d+id+d+f), v).WithTTL(ttl[0])); err != nil {
+			if err = txn.SetEntry(badger.NewEntry([]byte(tableName+d.Delimiter+id+d.Delimiter+k), []byte(v)).WithTTL(ttl[0])); err != nil {
 				return err
 			}
 		}
 	}
-
 	return txn.Commit()
 }
 
-// SetTableValue set/updata a table's value
-func SetTableValue(tableName, id, field string, value []byte, h Handle, ttl ...time.Duration) error {
-	if !checkkey(tableName, field, id) {
-		return errStr
-	}
-	txn := h.NewTransaction(true)
-	it := txn.NewIterator(badger.DefaultIteratorOptions)
-	defer txn.Discard()
-	defer it.Close()
+func (d *Badger) SetTableValue(tableName, id, field string, value []byte, ttl ...time.Duration) error {
 
-	if len(ttl) == 0 {
-		if err = txn.Set([]byte(tableName+d+id+d+field), []byte(value)); err != nil {
-			return err
-		}
-	} else {
-		if err = txn.SetEntry(badger.NewEntry([]byte(tableName+d+id+d+field), []byte(value)).WithTTL(ttl[0])); err != nil {
-			return err
-		}
-	}
-	it.Close()
-	return txn.Commit()
+	return nil
 }
 
 // ExistTable detect tableName is exist
-func ExistTable(tableName string, h Handle) bool {
-	txn := h.NewTransaction(false)
+func (d *Badger) ExistTable(tableName string) bool {
+	txn := d.DbHandle.NewTransaction(false)
 	it := txn.NewIterator(badger.DefaultIteratorOptions)
 	defer txn.Discard()
 	defer it.Close()
 
-	prefix := []byte(tableName + d)
+	prefix := []byte(tableName + d.Delimiter)
 
 	R := false
 	for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
@@ -201,13 +216,13 @@ func ExistTable(tableName string, h Handle) bool {
 }
 
 // ExistTableRecord detect table has id record
-func ExistTableRecord(tableName, id string, h Handle) bool {
-	txn := h.NewTransaction(false)
+func (d *Badger) ExistTableRecord(tableName, id string) bool {
+	txn := d.DbHandle.NewTransaction(false)
 	it := txn.NewIterator(badger.DefaultIteratorOptions)
 	defer txn.Discard()
 	defer it.Close()
 
-	prefix := []byte(tableName + d + id + d)
+	prefix := []byte(tableName + d.Delimiter + id + d.Delimiter)
 
 	R := false
 	for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
@@ -217,14 +232,14 @@ func ExistTableRecord(tableName, id string, h Handle) bool {
 }
 
 // GetTable get a table's all values
-func GetTable(tableName, id string, h Handle) map[string][]byte {
+func (d *Badger) GetTable(tableName, id string) map[string][]byte {
 
-	txn := h.NewTransaction(false) // 新建只读事务
+	txn := d.DbHandle.NewTransaction(false) // 新建只读事务
 	it := txn.NewIterator(badger.DefaultIteratorOptions)
 	defer txn.Discard()
 	defer it.Close()
 
-	prefix := []byte(tableName + d + id + d)
+	prefix := []byte(tableName + d.Delimiter + id + d.Delimiter)
 	preLen := len(prefix)
 	R := make(map[string][]byte)
 
@@ -244,13 +259,13 @@ func GetTable(tableName, id string, h Handle) map[string][]byte {
 }
 
 // GetTableValue get one specify value
-func GetTableValue(tableName, id, field string, h Handle) []byte {
-	txn := h.NewTransaction(false)
+func (d *Badger) GetTableValue(tableName, id, field string) []byte {
+	txn := d.DbHandle.NewTransaction(false)
 	it := txn.NewIterator(badger.DefaultIteratorOptions)
 	defer txn.Discard()
 	defer it.Close()
 
-	prefix := []byte(tableName + d + id + d + field)
+	prefix := []byte(tableName + d.Delimiter + id + d.Delimiter + field)
 	preLen := len(prefix)
 	var R []byte
 
@@ -275,8 +290,8 @@ func GetTableValue(tableName, id, field string, h Handle) []byte {
 }
 
 // EqualTableValue check the specify value is equal judgeValue
-func EqualTableValue(tableName, id, field string, judgeValue []byte, h Handle) bool {
-	if bytes.Equal(judgeValue, GetTableValue(tableName, id, field, h)) {
+func (d *Badger) EqualTableValue(tableName, id, field string, judgeValue []byte) bool {
+	if bytes.Equal(judgeValue, d.GetTableValue(tableName, id, field)) {
 		return true
 	}
 	return false
