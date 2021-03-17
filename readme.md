@@ -1,15 +1,17 @@
 # Golang key/Value database api
 
-我是一个大裁缝！
+
 
 Golang的key/value 储存可以在无SQL的情况下实现数据的存储，在部分场景下非常优雅，但是通常只有键值对形式的存储。在本仓库中，对api进行了统一，有单纯的键值对存储，还有间接实现的以表的结构的储存。本仓库集成了以下key/value数据库：
 
 - [badgerdb](https://github.com/dgraph-io/badger/v2)
 - [boltdb](https://github.com/boltdb/bolt)
 
-badger通过前缀实现表的结构，boltdb通过bucket嵌套实现表的结构；无论怎样，它们都通过一个唯一ID将几个字段联系在一起。
+badger通过前缀实现表的结构，boltdb通过bucket嵌套实现表的结构；无论怎样，它们的接口都一样。
 
-###### Start
+后续可能会增加对其他数据库的支持。
+
+### Start
 
 GO111MODULE=on
 
@@ -20,9 +22,9 @@ go build -o test test.go
 ./test
 ```
 
-###### 如何选择
+### 如何选择
 
-- 性能测试
+- 性能
 
 ```shell
 goos: windows
@@ -42,7 +44,7 @@ badgerdb综合性能是boltdb的十余倍，而且写是百余倍
 
 - 功能
 
-badgerdb的功能比boltdb更多，比如可以加密，可以有高性能的内存模式，还可以设置TTL
+badgerdb的功能比boltdb多，比如可以加密，可以有高性能的内存模式，还可以设置TTL
 
 - 其他
 
