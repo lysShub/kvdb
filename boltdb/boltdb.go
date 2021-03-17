@@ -2,6 +2,8 @@ package boltdb
 
 import (
 	"kvdb/com"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/boltdb/bolt"
@@ -10,21 +12,40 @@ import (
 // Handle handle
 type Handle = *bolt.DB
 
-type Boltdb struct {
-	Path     string
-	DbHandle Handle
-	Root     string
+type Bolt struct {
+	DbHandle Handle //句柄
+	Path     string //路径
+	Root     []byte //key/value的bucket名，默认_root
 }
-
-// 单纯key/value储存桶
-const sn = "_root"
 
 var err error
 var b *bolt.Bucket
 
 // OpenDb open
-func (d *Boltdb) OpenDb(path string) error {
-	db, err := bolt.Open(path, 0600, &bolt.Options{Timeout: 1 * time.Second})
+func (d *Bolt) OpenDb() error {
+	if d.Path != "" { // 设置路径
+		_, err := os.Stat(filepath.Dir(d.Path))
+		if err != nil {
+			if os.IsNotExist(err) { // 路径不存在
+				if err = os.MkdirAll(filepath.Dir(d.Path), 0666); err != nil {
+					return err
+				}
+			} else {
+				return err
+			}
+		}
+	} else { // 设置为默认路径
+		var path string = filepath.ToSlash(filepath.Dir(os.Args[0])) + `/db`
+		if err := os.MkdirAll(filepath.Dir(path), 0666); err != nil {
+			return err
+		}
+		d.Path = path
+	}
+	if d.Root == nil {
+		d.Root = []byte("_root")
+	}
+
+	db, err := bolt.Open(d.Path, 0600, &bolt.Options{Timeout: 1 * time.Second})
 	if err != nil {
 		return err
 	}
@@ -33,16 +54,16 @@ func (d *Boltdb) OpenDb(path string) error {
 }
 
 // CloseDb close
-func (d *Boltdb) Close() error {
+func (d *Bolt) Close() error {
 	return d.DbHandle.Close()
 }
 
 // key/value
 
 // SetKey set or updata key/value
-func (d *Boltdb) SetKey(key string, value []byte) error {
+func (d *Bolt) SetKey(key string, value []byte) error {
 	err = d.DbHandle.Update(func(tx *bolt.Tx) error {
-		if b, err = tx.CreateBucketIfNotExists([]byte(sn)); err != nil {
+		if b, err = tx.CreateBucketIfNotExists(d.Root); err != nil {
 			return err
 		}
 		return b.Put([]byte(key), value)
@@ -51,9 +72,9 @@ func (d *Boltdb) SetKey(key string, value []byte) error {
 }
 
 // DeleteKey delete key
-func (d *Boltdb) DeleteKey(key string) error {
+func (d *Bolt) DeleteKey(key string) error {
 	err = d.DbHandle.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(sn))
+		b := tx.Bucket(d.Root)
 		if b == nil {
 			return nil
 		}
@@ -63,10 +84,10 @@ func (d *Boltdb) DeleteKey(key string) error {
 }
 
 // ReadKey
-func (d *Boltdb) ReadKey(key string) []byte {
+func (d *Bolt) ReadKey(key string) []byte {
 	var r []byte
 	err = d.DbHandle.View(func(tx *bolt.Tx) error {
-		if b = tx.Bucket([]byte(sn)); b == nil {
+		if b = tx.Bucket(d.Root); b == nil {
 			return nil
 		}
 		_, r = b.Cursor().Seek([]byte(key))
@@ -78,9 +99,9 @@ func (d *Boltdb) ReadKey(key string) []byte {
 // table
 
 // SetTable
-func (d *Boltdb) SetTable(tableName string, p map[string]map[string][]byte) error {
+func (d *Bolt) SetTable(tableName string, p map[string]map[string][]byte) error {
 
-	err = d.DbHandle.Batch(func(tx *bolt.Tx) error {
+	err = d.DbHandle.Update(func(tx *bolt.Tx) error {
 		b, err := tx.CreateBucketIfNotExists([]byte(tableName))
 		if err != nil {
 			return err
@@ -105,7 +126,7 @@ func (d *Boltdb) SetTable(tableName string, p map[string]map[string][]byte) erro
 }
 
 // SetTableRow
-func (d *Boltdb) SetTableRow(tableName, id string, fv map[string][]byte) error {
+func (d *Bolt) SetTableRow(tableName, id string, fv map[string][]byte) error {
 	err = d.DbHandle.Update(func(tx *bolt.Tx) error {
 		b, err := tx.CreateBucketIfNotExists([]byte(tableName))
 		if err != nil {
@@ -128,7 +149,7 @@ func (d *Boltdb) SetTableRow(tableName, id string, fv map[string][]byte) error {
 }
 
 // SetTableValue
-func (d *Boltdb) SetTableValue(tableName, id, field string, value []byte) error {
+func (d *Bolt) SetTableValue(tableName, id, field string, value []byte) error {
 	err = d.DbHandle.Update(func(tx *bolt.Tx) error {
 		b, err := tx.CreateBucketIfNotExists([]byte(tableName))
 		if err != nil {
@@ -146,7 +167,7 @@ func (d *Boltdb) SetTableValue(tableName, id, field string, value []byte) error 
 }
 
 // DeleteTable
-func (d *Boltdb) DeleteTable(tableName string) error {
+func (d *Bolt) DeleteTable(tableName string) error {
 	err = d.DbHandle.Update(func(tx *bolt.Tx) error {
 		return tx.DeleteBucket([]byte(tableName))
 	})
@@ -154,7 +175,7 @@ func (d *Boltdb) DeleteTable(tableName string) error {
 }
 
 // DeleteTableRow
-func (d *Boltdb) DeleteTableRow(tableName, id string) error {
+func (d *Bolt) DeleteTableRow(tableName, id string) error {
 	err = d.DbHandle.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(tableName))
 		if b == nil { // bucket not exist
@@ -166,7 +187,7 @@ func (d *Boltdb) DeleteTableRow(tableName, id string) error {
 }
 
 // ReadTable
-func (d *Boltdb) ReadTable(tableName string) map[string]map[string][]byte {
+func (d *Bolt) ReadTable(tableName string) map[string]map[string][]byte {
 	var r map[string]map[string][]byte = make(map[string]map[string][]byte)
 
 	_ = d.DbHandle.View(func(tx *bolt.Tx) error {
@@ -174,27 +195,53 @@ func (d *Boltdb) ReadTable(tableName string) map[string]map[string][]byte {
 		if b == nil {
 			return nil
 		}
-
-		var c, sc *bolt.Cursor = b.Cursor(), nil
-		for k, v := c.First(); k != nil; k, v = c.Next() {
-			if k != nil && v == nil {
-				var tmp map[string][]byte = make(map[string][]byte)
-				sc = tx.Bucket(k).Cursor()
-				for k, v := sc.First(); k != nil; k, v = sc.Next() {
-					if k != nil && v != nil {
-						tmp[string(k)] = v
+		var f func(buk *bolt.Bucket) error
+		var tmp map[string][]byte = make(map[string][]byte)
+		var beforeID string
+		f = func(buk *bolt.Bucket) error {
+			err := d.DbHandle.View(func(tx *bolt.Tx) error {
+				var c *bolt.Cursor
+				if buk == nil {
+					c = tx.Cursor()
+				} else {
+					c = buk.Cursor()
+				}
+				for k, v := c.First(); k != nil; k, v = c.Next() {
+					if k != nil {
+						if v == nil {
+							// id
+							if beforeID != "" {
+								r[beforeID] = tmp
+								tmp = make(map[string][]byte)
+							}
+							beforeID = string(k)
+							var buk2 *bolt.Bucket
+							if buk == nil {
+								buk2 = tx.Bucket(k)
+							} else {
+								buk2 = buk.Bucket(k)
+							}
+							f(buk2)
+						} else {
+							// field
+							tmp[string(k)] = v
+						}
 					}
 				}
-				r[string(k)] = tmp
-			}
+				r[beforeID] = tmp
+				return nil
+			})
+			return err
 		}
+		f(b)
+
 		return nil
 	})
 	return r
 }
 
 // ReadTableExist
-func (d *Boltdb) ReadTableExist(tableName string) bool {
+func (d *Bolt) ReadTableExist(tableName string) bool {
 	var r bool
 	_ = d.DbHandle.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(tableName))
@@ -209,7 +256,7 @@ func (d *Boltdb) ReadTableExist(tableName string) bool {
 }
 
 // ReadTableRow
-func (d *Boltdb) ReadTableRow(tableName, id string) map[string][]byte {
+func (d *Bolt) ReadTableRow(tableName, id string) map[string][]byte {
 	var r map[string][]byte = make(map[string][]byte)
 	_ = d.DbHandle.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(tableName))
@@ -232,7 +279,7 @@ func (d *Boltdb) ReadTableRow(tableName, id string) map[string][]byte {
 }
 
 // ReadTableValue
-func (d *Boltdb) ReadTableValue(tableName, id, field string) []byte {
+func (d *Bolt) ReadTableValue(tableName, id, field string) []byte {
 	var r []byte
 	_ = d.DbHandle.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(tableName))
@@ -250,7 +297,7 @@ func (d *Boltdb) ReadTableValue(tableName, id, field string) []byte {
 }
 
 // ReadTableLimits
-func (d *Boltdb) ReadTableLimits(tableName, field, exp string, value int) []string {
+func (d *Bolt) ReadTableLimits(tableName, field, exp string, value int) []string {
 	var r []string
 	_ = d.DbHandle.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(tableName))
@@ -269,7 +316,7 @@ func (d *Boltdb) ReadTableLimits(tableName, field, exp string, value int) []stri
 					if string(k) == field {
 						fag, err := com.ExpressionCalculate(exp, value, v)
 						if err != nil {
-							return err
+							return nil
 						}
 						if fag {
 							r = append(r, string(id))
