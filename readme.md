@@ -17,7 +17,7 @@ GO111MODULE=on
 git clone https://github.com/lysShub/kvdb.git
 cd ./kvdb/test
 go build -o test test.go
-,/test
+./test
 ```
 
 ###### 如何选择
