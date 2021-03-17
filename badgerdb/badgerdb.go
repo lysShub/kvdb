@@ -5,7 +5,6 @@ import (
 	"errors"
 	"kvdb/com"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -34,32 +33,40 @@ func (d *Badger) OpenDb() error {
 		fi, err := os.Stat(d.Path)
 		if err != nil {
 			if os.IsNotExist(err) {
-				if err = os.MkdirAll(d.Path, os.FileMode(os.O_CREATE)|os.FileMode(os.O_RDWR)); err != nil {
+				if err = os.MkdirAll(d.Path, 0666); err != nil {
 					return err
 				}
 			} else {
 				return err
 			}
 		} else if !fi.IsDir() { //存在同名文件
-			if err = os.MkdirAll(d.Path, os.FileMode(os.O_CREATE)|os.FileMode(os.O_RDWR)); err != nil {
+			if err = os.MkdirAll(d.Path, 0600); err != nil {
 				return err
 			}
 		}
 	} else { // 设置为默认路径
-		var path string = filepath.ToSlash(filepath.Dir(os.Args[0])) + `/db/`
-		if err := os.MkdirAll(path, os.FileMode(os.O_CREATE)|os.FileMode(os.O_RDWR)); err != nil {
-			return err
+		var path string = com.GetExePath() + `\db\`
+		_, err := os.Stat(path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				if err = os.Mkdir(path, 0600); err != nil {
+					return err
+				}
+			} else {
+				return err
+			}
 		}
 		d.Path = path
 	}
 
 	var opts badger.Options
-	opts = badger.DefaultOptions(d.Path)
+	if d.RAM {
+		opts = badger.DefaultOptions("").WithInMemory(true)
+	} else {
+		opts = badger.DefaultOptions(d.Path)
+	}
 	opts = opts.WithLoggingLevel(badger.ERROR)
 
-	if d.RAM {
-		opts.InMemory = true
-	}
 	if d.Password[:] != nil {
 		opts.EncryptionKey = d.Password[:]
 	}
@@ -67,8 +74,7 @@ func (d *Badger) OpenDb() error {
 		d.Delimiter = "`"
 	}
 	opts.ValueLogFileSize = 1 << 29 //512MB
-	opts.Dir = d.Path
-	opts.ValueDir = d.Path
+
 	db, err := badger.Open(opts)
 	d.DbHandle = db
 	return err
@@ -199,7 +205,6 @@ func (d *Badger) SetTableRow(tableName, id string, kv map[string][]byte, ttl ...
 	txn := d.DbHandle.NewTransaction(true)
 	it := txn.NewIterator(badger.DefaultIteratorOptions)
 	defer txn.Discard()
-	defer it.Close()
 
 	for k, v := range kv {
 		if !d.checkkey(k) {
@@ -215,6 +220,7 @@ func (d *Badger) SetTableRow(tableName, id string, kv map[string][]byte, ttl ...
 			}
 		}
 	}
+	it.Close()
 	return txn.Commit()
 }
 
@@ -226,7 +232,6 @@ func (d *Badger) SetTableValue(tableName, id, field string, value []byte, ttl ..
 	txn := d.DbHandle.NewTransaction(true)
 	it := txn.NewIterator(badger.DefaultIteratorOptions)
 	defer txn.Discard()
-	defer it.Close()
 	if len(ttl) == 0 {
 		if err = txn.Set([]byte(tableName+d.Delimiter+id+d.Delimiter+field), []byte(value)); err != nil {
 			return err
@@ -236,6 +241,7 @@ func (d *Badger) SetTableValue(tableName, id, field string, value []byte, ttl ..
 			return err
 		}
 	}
+	it.Close()
 	return txn.Commit()
 }
 
@@ -247,7 +253,6 @@ func (d *Badger) DeleteTable(tableName string) error {
 	txn := d.DbHandle.NewTransaction(true)
 	it := txn.NewIterator(badger.DefaultIteratorOptions)
 	defer txn.Discard()
-	defer it.Close()
 
 	prefix := []byte(tableName + d.Delimiter)
 
@@ -256,6 +261,7 @@ func (d *Badger) DeleteTable(tableName string) error {
 			return err
 		}
 	}
+	it.Close()
 	return txn.Commit()
 }
 
@@ -267,7 +273,6 @@ func (d *Badger) DeleteTableRow(tableName, id string) error {
 	txn := d.DbHandle.NewTransaction(true)
 	it := txn.NewIterator(badger.DefaultIteratorOptions)
 	defer txn.Discard()
-	defer it.Close()
 
 	prefix := []byte(tableName + d.Delimiter + id + d.Delimiter)
 
@@ -276,6 +281,7 @@ func (d *Badger) DeleteTableRow(tableName, id string) error {
 			return err
 		}
 	}
+	it.Close()
 	return txn.Commit()
 }
 
@@ -291,13 +297,15 @@ func (d *Badger) ReadTable(tableName string) map[string]map[string][]byte {
 	txn := d.DbHandle.NewTransaction(false)
 	it := txn.NewIterator(badger.DefaultIteratorOptions)
 	defer txn.Discard()
-	defer it.Close()
 
 	var deByte, v []byte = []byte(d.Delimiter), nil
 	prefix := []byte(tableName + d.Delimiter)
 
 	for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
 		rk := bytes.SplitN(it.Item().Key(), deByte, 3)
+		if len(rk) != 3 {
+			return nil
+		}
 		if string(rk[1]) != tmpID {
 			if tmpID != "" {
 				r[tmpID] = sr
@@ -311,6 +319,7 @@ func (d *Badger) ReadTable(tableName string) map[string]map[string][]byte {
 		sr[string(rk[2])] = v
 	}
 	r[tmpID] = sr
+	it.Close()
 
 	return r
 }
@@ -323,7 +332,6 @@ func (d *Badger) ReadTableExist(tableName string) bool {
 	txn := d.DbHandle.NewTransaction(false)
 	it := txn.NewIterator(badger.DefaultIteratorOptions)
 	defer txn.Discard()
-	defer it.Close()
 
 	prefix := []byte(tableName + d.Delimiter)
 
@@ -331,6 +339,8 @@ func (d *Badger) ReadTableExist(tableName string) bool {
 	for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
 		R = true
 	}
+	it.Close()
+
 	return R
 }
 
@@ -343,15 +353,23 @@ func (d *Badger) ReadTableRow(tableName, id string) map[string][]byte {
 	txn := d.DbHandle.NewTransaction(false)
 	it := txn.NewIterator(badger.DefaultIteratorOptions)
 	defer txn.Discard()
-	defer it.Close()
 
 	prefix := []byte(tableName + d.Delimiter + id + d.Delimiter)
 
 	for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
-		if r[string(it.Item().Key())], err = it.Item().ValueCopy(nil); err != nil {
+		rk := bytes.SplitN(it.Item().KeyCopy(nil), []byte(d.Delimiter), 3)
+		if len(rk) == 3 {
+			r[string(rk[2])], err = it.Item().ValueCopy(nil)
+			if err != nil {
+				return nil
+			}
+		} else {
 			return nil
 		}
+
 	}
+	it.Close()
+
 	return r
 }
 
@@ -364,13 +382,16 @@ func (d *Badger) ReadTableValue(tableName, id, field string) []byte {
 	txn := d.DbHandle.NewTransaction(false)
 	it := txn.NewIterator(badger.DefaultIteratorOptions)
 	defer txn.Discard()
-	defer it.Close()
-	prefix := []byte(tableName + d.Delimiter + id + d.Delimiter + field + d.Delimiter)
+
+	prefix := []byte(tableName + d.Delimiter + id + d.Delimiter + field)
 	for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
+
 		if r, err = it.Item().ValueCopy(nil); err != nil {
 			return nil
 		}
 	}
+	it.Close()
+
 	return r
 }
 
@@ -383,13 +404,16 @@ func (d *Badger) ReadTableLimits(tableName, field, exp string, value int) []stri
 	txn := d.DbHandle.NewTransaction(false)
 	it := txn.NewIterator(badger.DefaultIteratorOptions)
 	defer txn.Discard()
-	defer it.Close()
+
 	prefix := []byte(tableName + d.Delimiter)
 
 	var deByte, v []byte = []byte(d.Delimiter), nil
 	var rs [][]byte
 	for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
 		rs = bytes.SplitN(it.Item().Key(), deByte, 3)
+		if len(rs) != 3 {
+			return nil
+		}
 		if string(rs[2]) == field {
 			if v, err = it.Item().ValueCopy(nil); err != nil {
 				return nil
@@ -403,6 +427,8 @@ func (d *Badger) ReadTableLimits(tableName, field, exp string, value int) []stri
 			}
 		}
 	}
-	return r
 
+	it.Close()
+
+	return r
 }

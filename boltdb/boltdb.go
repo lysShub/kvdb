@@ -23,11 +23,11 @@ var b *bolt.Bucket
 
 // OpenDb open
 func (d *Bolt) OpenDb() error {
-	if d.Path != "" { // 设置路径
+	if d.Path != "" {
 		_, err := os.Stat(filepath.Dir(d.Path))
 		if err != nil {
 			if os.IsNotExist(err) { // 路径不存在
-				if err = os.MkdirAll(filepath.Dir(d.Path), 0666); err != nil {
+				if err = os.MkdirAll(filepath.Dir(d.Path), 0600); err != nil {
 					return err
 				}
 			} else {
@@ -35,10 +35,18 @@ func (d *Bolt) OpenDb() error {
 			}
 		}
 	} else { // 设置为默认路径
-		var path string = filepath.ToSlash(filepath.Dir(os.Args[0])) + `/db`
-		if err := os.MkdirAll(filepath.Dir(path), 0666); err != nil {
-			return err
+		var path string = com.GetExePath() + `/data.db`
+		_, err := os.Stat(filepath.Dir(path))
+		if err != nil {
+			if os.IsNotExist(err) {
+				if err = os.MkdirAll(filepath.Dir(path), 0600); err != nil {
+					return err
+				}
+			} else {
+				return err
+			}
 		}
+
 		d.Path = path
 	}
 	if d.Root == nil {
@@ -102,7 +110,7 @@ func (d *Bolt) ReadKey(key string) []byte {
 func (d *Bolt) SetTable(tableName string, p map[string]map[string][]byte) error {
 
 	err = d.DbHandle.Update(func(tx *bolt.Tx) error {
-		b, err := tx.CreateBucketIfNotExists([]byte(tableName))
+		b, err = tx.CreateBucketIfNotExists([]byte(tableName))
 		if err != nil {
 			return err
 		}
@@ -128,7 +136,7 @@ func (d *Bolt) SetTable(tableName string, p map[string]map[string][]byte) error 
 // SetTableRow
 func (d *Bolt) SetTableRow(tableName, id string, fv map[string][]byte) error {
 	err = d.DbHandle.Update(func(tx *bolt.Tx) error {
-		b, err := tx.CreateBucketIfNotExists([]byte(tableName))
+		b, err = tx.CreateBucketIfNotExists([]byte(tableName))
 		if err != nil {
 			return err
 		}
@@ -150,14 +158,15 @@ func (d *Bolt) SetTableRow(tableName, id string, fv map[string][]byte) error {
 
 // SetTableValue
 func (d *Bolt) SetTableValue(tableName, id, field string, value []byte) error {
+
 	err = d.DbHandle.Update(func(tx *bolt.Tx) error {
-		b, err := tx.CreateBucketIfNotExists([]byte(tableName))
+		b, err = tx.CreateBucketIfNotExists([]byte(tableName))
 		if err != nil {
 			return err
 		}
 
 		var sb *bolt.Bucket
-		if sb, err := b.CreateBucketIfNotExists([]byte(id)); sb == nil {
+		if sb, err = b.CreateBucketIfNotExists([]byte(id)); sb == nil {
 			return err
 		}
 
@@ -297,7 +306,7 @@ func (d *Bolt) ReadTableValue(tableName, id, field string) []byte {
 }
 
 // ReadTableLimits
-func (d *Bolt) ReadTableLimits(tableName, field, exp string, value int) []string {
+func (d *Bolt) ReadTableLimits1(tableName, field, exp string, value int) []string {
 	var r []string
 	_ = d.DbHandle.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(tableName))
@@ -326,6 +335,60 @@ func (d *Bolt) ReadTableLimits(tableName, field, exp string, value int) []string
 				}
 			}
 		}
+		return nil
+	})
+
+	return r
+}
+
+func (d *Bolt) ReadTableLimits(tableName, field, exp string, value int) []string {
+	var r []string
+	_ = d.DbHandle.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(tableName))
+		if b == nil {
+			return nil
+		}
+
+		var f func(buk *bolt.Bucket) error
+		var beforeID string
+		f = func(buk *bolt.Bucket) error {
+			err := d.DbHandle.View(func(tx *bolt.Tx) error {
+
+				var c *bolt.Cursor
+				if buk == nil {
+					c = tx.Cursor()
+				} else {
+					c = buk.Cursor()
+				}
+				for k, v := c.First(); k != nil; k, v = c.Next() {
+					if v == nil {
+						// id
+						beforeID = string(k)
+						var buk2 *bolt.Bucket
+						if buk == nil {
+							buk2 = tx.Bucket(k)
+						} else {
+							buk2 = buk.Bucket(k)
+						}
+						f(buk2)
+					} else {
+						// field
+						if string(k) == field {
+							fag, err := com.ExpressionCalculate(exp, value, v)
+							if err != nil {
+								return nil
+							}
+							if fag {
+								r = append(r, string(beforeID))
+							}
+						}
+					}
+				}
+				return nil
+			})
+			return err
+		}
+		f(b)
 		return nil
 	})
 

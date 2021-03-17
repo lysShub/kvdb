@@ -19,15 +19,22 @@ type KVDB struct {
 	// 也有简单的key/value键值对储存；badger是没有前缀存储，boltdb是存储在特定的一个桶中
 	// 在表中，每一条记录都有一此表中唯一id将各项字段联系起来，类似主键
 
-	Type uint8  // 必须 0:badgerdb; 1:boltdb
-	DH   Handle // 只设置Type，Init将以默认参数打开
-	Path string // 默认当前路径，badger是文件夹，boltdb是文件
-	// 仅badgerdb
-	Password  [16]byte // 密码，默认无
-	RAMMode   bool     // 内存模式，默认false
-	Delimiter string   //分割符，默认`
-	// 仅boltdb
-	Root []byte // 键值储存bucket名，默认_root
+	// 必须 0:badgerdb; 1:boltdb
+	Type uint8
+	// 只设置Type，Init将以默认参数打开
+	DH Handle
+	// 默认当前路径，badger是文件夹，boltdb是文件
+	Path string
+	/* 仅badgerdb */
+	// 密码，默认无
+	Password [16]byte
+	// 内存模式、性能高很多，默认false
+	RAMMode bool
+	//分割符，默认`
+	Delimiter string
+	/* 仅boltdb */
+	// 键值储存bucket名，默认_root
+	Root []byte
 }
 
 // 将操作与预期不符将返回错误；如删除表中某一条记录，但此表不存在，将不会有错误信息返回

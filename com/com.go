@@ -1,10 +1,32 @@
 package com
 
-import "errors"
+import (
+	"errors"
+	"os"
+	"path/filepath"
+)
 
-func ExpressionCalculate(exp string, lft int, rgt []byte) (bool, error) {
-	var lv, fv int = lft, 0
-	for i := len(rgt); i > 0; i-- {
+// 方法可执行文件(不包括)所在路径
+func GetExePath() string {
+	ex, err := os.Executable()
+	if err != nil {
+		exReal, err := filepath.EvalSymlinks(ex)
+		if err != nil {
+			dir, err := filepath.Abs(filepath.Dir(os.Args[0]))
+			if err != nil {
+				return "./"
+			}
+			return dir
+		}
+		return filepath.Dir(exReal)
+	}
+	return filepath.Dir(ex)
+
+}
+
+func ExpressionCalculate(exp string, lv int, rgt []byte) (bool, error) {
+	var fv int = 0
+	for i := 0; i < len(rgt); i++ {
 		fv = fv + int(rgt[i])<<((len(rgt)-i)*8)
 	}
 
@@ -41,5 +63,4 @@ func ExpressionCalculate(exp string, lft int, rgt []byte) (bool, error) {
 	} else {
 		return false, errors.New(`invalid expression`)
 	}
-
 }
