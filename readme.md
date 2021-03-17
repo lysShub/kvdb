@@ -38,7 +38,7 @@ PASS
 ok      kvdb/test/test_prop     19.514s
 ```
 
-badgerdb综合性能是boltdb的十余倍，而且写是百余辈
+badgerdb综合性能是boltdb的十余倍，而且写是百余倍
 
 - 功能
 
