@@ -81,5 +81,6 @@ func Comprehensive(db *kvdb.KVDB) error {
 }
 
 func Write(db *kvdb.KVDB, i int) error {
+
 	return db.SetTable("tableName"+strconv.Itoa(i), pp)
 }

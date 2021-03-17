@@ -25,7 +25,7 @@ func main() {
 	var err error
 	var db = new(kvdb.KVDB)
 
-	db.Type = 1
+	db.Type = 0
 	db.RAMMode = true
 
 	if err = db.Init(); err != nil {
@@ -42,16 +42,6 @@ func main() {
 	}
 
 	fmt.Println(db.ReadTableLimits("test", "field2", "=", 19986))
-	fmt.Println((time.Now().UnixNano() - a) / 1e6)
+	fmt.Println("用时：", (time.Now().UnixNano()-a)/1e6, "ms")
 
 }
-
-// a := time.Now().UnixNano()
-
-// if err = db.SetTable("test", pp); err != nil {
-// 	fmt.Println(1, err)
-// 	return
-// }
-
-// fmt.Println(db.ReadTable("test"))
-// fmt.Println((time.Now().UnixNano() - a) / 1e6)
