@@ -2,9 +2,10 @@ package kvdb
 
 import (
 	"errors"
-	"kvdb/badgerdb"
-	"kvdb/boltdb"
 	"time"
+
+	"github.com/lysShub/kvdb/badgerdb"
+	"github.com/lysShub/kvdb/boltdb"
 )
 
 // Handle

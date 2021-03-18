@@ -1,4 +1,4 @@
-module kvdb
+module github.com/lysShub/kvdb
 
 go 1.15
 

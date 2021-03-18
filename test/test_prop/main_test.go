@@ -2,8 +2,9 @@ package main
 
 import (
 	"fmt"
-	"kvdb"
 	"testing"
+
+	"github.com/lysShub/kvdb"
 )
 
 func BenchmarkComprehensive_blot(b *testing.B) {

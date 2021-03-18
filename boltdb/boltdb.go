@@ -1,10 +1,11 @@
 package boltdb
 
 import (
-	"kvdb/com"
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/lysShub/kvdb/com"
 
 	"github.com/boltdb/bolt"
 )

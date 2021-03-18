@@ -3,10 +3,11 @@ package badgerdb
 import (
 	"bytes"
 	"errors"
-	"kvdb/com"
 	"os"
 	"strings"
 	"time"
+
+	"github.com/lysShub/kvdb/com"
 
 	badger "github.com/dgraph-io/badger/v2"
 )

@@ -2,8 +2,9 @@ package main
 
 import (
 	"fmt"
-	"kvdb"
 	"time"
+
+	"github.com/lysShub/kvdb"
 )
 
 var pp map[string]map[string][]byte = map[string]map[string][]byte{
@@ -41,7 +42,7 @@ func main() {
 		return
 	}
 
-	fmt.Println(db.ReadTableLimits("test", "field2", "=", 19986))
+	fmt.Println(db.ReadTable("test"))
 	fmt.Println("用时：", (time.Now().UnixNano()-a)/1e6, "ms")
 
 }
