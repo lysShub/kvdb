@@ -35,14 +35,15 @@ func main() {
 	}
 	defer db.Close()
 
-	a := time.Now().UnixNano()
-
+	a := time.Now()
 	if err = db.SetTable("test", pp); err != nil {
 		fmt.Println(1, err)
 		return
 	}
+	r := db.ReadTable("test")
+	b := time.Since(a)
 
-	fmt.Println(db.ReadTable("test"))
-	fmt.Println("用时：", (time.Now().UnixNano()-a)/1e6, "ms")
-
+	fmt.Println(r)
+	fmt.Println("用时：", b)
+	return
 }
