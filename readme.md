@@ -13,7 +13,19 @@ badger通过前缀实现表的结构，boltdb通过bucket嵌套实现表的结�
 
 ### Start
 
-GO111MODULE=on
+**GO111MODULE=on**
+
+```go
+go get github.com/lysShub/kvdb
+```
+
+```go
+cd %GOPATH%/src/github.com/lysShub/kvdb/test
+go build -o test test.go
+./test
+```
+
+
 
 ```shell
 git clone https://github.com/lysShub/kvdb.git

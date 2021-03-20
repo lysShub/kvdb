@@ -22,7 +22,7 @@ type Badger struct {
 	Path      string   //储存路径，默认路径文当前路径db文件夹
 	Password  [16]byte //密码，默认无密码
 	RAM       bool     //内存模式，默认false
-	Delimiter string   //分割符，默认为字符`
+	Delimiter string   //分割符，默认为字符```
 }
 
 var errStr error = errors.New("can not include delimiter character")
@@ -72,7 +72,7 @@ func (d *Badger) OpenDb() error {
 		opts.EncryptionKey = d.Password[:]
 	}
 	if d.Delimiter == "" {
-		d.Delimiter = "`"
+		d.Delimiter = "```"
 	}
 	opts.ValueLogFileSize = 1 << 29 //512MB
 
