@@ -374,6 +374,26 @@ func (d *Badger) ReadTableRow(tableName, id string) map[string][]byte {
 	return r
 }
 
+// ReadTableRowExist
+func (d *Badger) ReadTableRowExist(tableName, id string) bool {
+	if !d.checkkey(tableName, id) {
+		return false
+	}
+
+	txn := d.DbHandle.NewTransaction(false)
+	it := txn.NewIterator(badger.DefaultIteratorOptions)
+	defer txn.Discard()
+
+	prefix := []byte(tableName + d.Delimiter + id + d.Delimiter)
+	var r bool = false
+	for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
+		r = true
+		break
+	}
+	it.Close()
+	return r
+}
+
 // ReadTableValue
 func (d *Badger) ReadTableValue(tableName, id, field string) []byte {
 	if !d.checkkey(tableName, id, field) {
