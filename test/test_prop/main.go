@@ -78,7 +78,6 @@ func Comprehensive(db *kvdb.KVDB) error {
 		return errors.New("ReadTableExist")
 	}
 	return nil
-
 }
 
 func Write(db *kvdb.KVDB, i int) error {
