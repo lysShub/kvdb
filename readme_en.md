@@ -4,9 +4,9 @@
 
 inherited KV database:
 
-​	[badgerdb](https://github.com/dgraph-io/badger/v2)[boltdb](https://github.com/boltdb/bolt)
+- [badgerdb](https://github.com/dgraph-io/badger/v2)[boltdb](https://github.com/boltdb/bolt)
 
-​	[boltdb](https://github.com/boltdb/bolt)
+- [boltdb](https://github.com/boltdb/bolt)
 
 Unified api make it easier to using and suppoer "table" struct data.
 

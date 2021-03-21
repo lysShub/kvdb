@@ -1,6 +1,6 @@
 # Golang key/Value database api
 
-**(EN)[]**
+**(EN)[https://github.com/lysShub/kvdb/blob/master/readme_en.md]**
 
 Golang的key/value 储存可以在无SQL的情况下实现数据的存储，在部分场景下使用非常优雅，但是通常只有键值对形式的存储。在本仓库中，对api进行了统一，有单纯的键值对存储，还有间接实现的以表的结构的储存。本仓库集成了以下数据库：
 
